@@ -1,0 +1,15 @@
+{
+  "name": "checkerboard",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "types": "./index.d.ts",
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.437.0"
+  }
+}
