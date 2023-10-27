@@ -1,5 +1,3 @@
-import { APIGatewayProxyHandler } from 'aws-lambda'
-
 import {
   SecretsManagerClient,
   GetSecretValueCommand,
@@ -62,13 +60,11 @@ const commentOnStory = async (storyId: string, comment: string) => {
       text: comment,
     }),
   })
-  console.log({ commentResponse })
-  const commentJson = await commentResponse.json()
 
-  return commentJson
+  return await commentResponse.json()
 }
 
-export const handler: APIGatewayProxyHandler = async (event) => {
+export const handler = async () => {
   const { testStoryId } = await getSecrets()
   const { ideasStories, nextIdeasUrl } = await getIdeasStories()
 
@@ -77,7 +73,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   const ideasStoryPromises: Promise<any>[] = []
 
   ideasStories.forEach((story: any) => {
-    console.log(new Date(story.created_at) > sixMonthsAgo)
+    // Replace the condition here with `new Date(story.created_at) > sixMonthsAgo` when ready
     if (story.id === parseInt(testStoryId, 10)) {
       ideasStoryPromises.push(commentOnStory(story.id, WARNING_MESSAGE))
     }
