@@ -50,7 +50,7 @@ const getIdeasStories = async () => {
 const commentOnStory = async (storyId: string, comment: string) => {
   const { shortcutToken } = await getSecrets()
 
-  const commentResponse = await fetch(`${BASE_URL}/stories/${storyId}/comments`, {
+  return await fetch(`${BASE_URL}/stories/${storyId}/comments`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -60,8 +60,6 @@ const commentOnStory = async (storyId: string, comment: string) => {
       text: comment,
     }),
   })
-
-  return await commentResponse.json()
 }
 
 export const handler = async () => {
