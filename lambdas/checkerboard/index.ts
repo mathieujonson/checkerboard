@@ -4,13 +4,16 @@ import {
   GetSecretValueCommandOutput,
 } from '@aws-sdk/client-secrets-manager'
 
+import { Comment } from './types'
+
 let secretsManagerClient: SecretsManagerClient
 let shortcutSecretOutput: GetSecretValueCommandOutput
 let shortcutSecrets: any
 
 const BASE_URL = 'https://api.app.shortcut.com/api/v3'
 
-const WARNING_MESSAGE = `This story is more than 6 months old, and isn't prioritized. Stakeholders will be notified in one week of an intent to archive.`
+const WARNING_MESSAGE = `**AUTOMATED MESSAGE:** This story is more than 6 months old, and it hasn't been prioritized. Stakeholders will be notified in one week of an intent to archive.`
+const TAGGING_MESSAGE = `**AUTOMATED MESSAGE:** This story will be archived in one week. If we would like to keep this card, we should move it to the appropriate column.`
 
 const getSecrets = async () => {
   if (shortcutSecrets) {
@@ -30,10 +33,11 @@ const getSecrets = async () => {
   return shortcutSecrets
 }
 
-const getIdeasStories = async () => {
-  const { ideasStateId, shortcutToken } = await getSecrets()
+const getColumnStories = async () => {
+  const { columnStateId, shortcutToken } = await getSecrets()
 
-  const ideasStoriesResponse = await fetch(`${BASE_URL}/search/stories?query=state:${ideasStateId}`, {
+  // TODO: handle pagination
+  const columnStoriesResponse = await fetch(`${BASE_URL}/search/stories?query=state:${columnStateId}`, {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
@@ -41,10 +45,11 @@ const getIdeasStories = async () => {
     },
   })
 
-  const ideasStoriesJson = await ideasStoriesResponse.json()
-  const { data: ideasStories, next: nextIdeasUrl } = ideasStoriesJson
+  const { data: columnStories, next: nextStoriesUrl } = await columnStoriesResponse.json()
 
-  return { ideasStories, nextIdeasUrl }
+  console.log({ nextStoriesUrl })
+
+  return { columnStories, nextStoriesUrl }
 }
 
 const commentOnStory = async (storyId: string, comment: string) => {
@@ -64,26 +69,82 @@ const commentOnStory = async (storyId: string, comment: string) => {
   return await commentResponse.json()
 }
 
-export const handler = async () => {
-  const { testStoryId } = await getSecrets()
-  const { ideasStories, nextIdeasUrl } = await getIdeasStories()
+const processComments = (comments: Comment[]) => {
+  const oneWeekAgo = new Date(new Date().getTime() - 1000 * 60 * 60 * 24 * 7)
 
-  const sixMonthsAgo = new Date(new Date().getTime() - 1000 * 60 * 60 * 24 * 30 * 6)
+  let hasWarningComment = false
+  let warningCommentOlderThanOneWeek = false
+  let hasTaggingComment = false
+  let taggingCommentOlderThanOneWeek = false
 
-  const ideasStoryPromises: Promise<any>[] = []
-
-  ideasStories.forEach((story: any) => {
-    // Replace the condition here with `new Date(story.created_at) > sixMonthsAgo` when ready
-    if (story.id === parseInt(testStoryId, 10)) {
-      ideasStoryPromises.push(commentOnStory(story.id, WARNING_MESSAGE))
+  for (const comment of comments) {
+    if (comment.deleted) {
+      continue
     }
-  })
 
-  await Promise.all(ideasStoryPromises)
+    if (comment.text === WARNING_MESSAGE) {
+      hasWarningComment = true
+      warningCommentOlderThanOneWeek = new Date(comment.created_at) < oneWeekAgo
+    } else if (comment.text?.startsWith(TAGGING_MESSAGE)) {
+      hasTaggingComment = true
+      taggingCommentOlderThanOneWeek = new Date(comment.created_at) < oneWeekAgo
+    }
+  }
 
   return {
-    statusCode: 200,
-    headers: {},
-    body: 'LLFG',
+    hasWarningComment,
+    warningCommentOlderThanOneWeek,
+    hasTaggingComment,
+    taggingCommentOlderThanOneWeek,
   }
+}
+
+const generateTaggingMessage = async () => {
+  const { stakeholderUserNames } = await getSecrets()
+
+  if (!stakeholderUserNames) {
+    return TAGGING_MESSAGE
+  }
+
+  const stakeholderUserNamesArray = stakeholderUserNames.split(',')
+
+  let stakeholderUserNamesString = stakeholderUserNamesArray.map((name: string) => `@${name}`).join(', ')
+
+  stakeholderUserNamesString &&= ` cc: ${stakeholderUserNamesString}`
+
+  return `${TAGGING_MESSAGE}${stakeholderUserNamesString}`
+}
+
+export const handler = async () => {
+  const { testStoryId } = await getSecrets()
+  const { columnStories, nextStoriesUrl } = await getColumnStories()
+
+  const generatedTaggingMessage = await generateTaggingMessage()
+
+  const columnStoryPromises: Promise<any>[] = []
+
+  for (const story of columnStories) {
+    if (story.archived) {
+      continue
+    }
+
+    // Replace the condition here with `new Date(story.created_at) > sixMonthsAgo` when ready
+    if (story.id === parseInt(testStoryId, 10)) {
+      console.log(story)
+
+      const { hasWarningComment, warningCommentOlderThanOneWeek, hasTaggingComment, taggingCommentOlderThanOneWeek } =
+        processComments(story.comments)
+
+      if (hasWarningComment && hasTaggingComment && taggingCommentOlderThanOneWeek) {
+        // TODO: actually archive the story
+        columnStoryPromises.push(commentOnStory(story.id, 'archived'))
+      } else if (hasWarningComment && !hasTaggingComment && warningCommentOlderThanOneWeek) {
+        columnStoryPromises.push(commentOnStory(story.id, generatedTaggingMessage))
+      } else if (!hasWarningComment) {
+        columnStoryPromises.push(commentOnStory(story.id, WARNING_MESSAGE))
+      }
+    }
+  }
+
+  await Promise.all(columnStoryPromises)
 }
